@@ -2,6 +2,7 @@
 
 #include <functional>
 #include <Windows.h>
+#include <Shellapi.h>
 
 namespace dimmer {
     class TrayMenu {
