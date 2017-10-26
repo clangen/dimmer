@@ -45,6 +45,7 @@ using namespace dimmer;
 #define MENU_ID_POLL 501
 #define MENU_ID_MONITOR_BASE 1000
 
+constexpr wchar_t version[] = L"v0.1";
 constexpr wchar_t className[] = L"DimmerTrayMenuClass";
 constexpr wchar_t windowTitle[] = L"DimmerTrayMenuWindow";
 constexpr int offscreen = -32000;
@@ -222,7 +223,9 @@ void TrayMenu::initIcon() {
     this->iconData.uCallbackMessage = WM_TRAYICON;
     this->iconData.hIcon = trayIcon;
 
-    static const std::wstring title = L"dimmer";
+    static const std::wstring title =
+        std::wstring(L"dimmer") + L" - " + std::wstring(version);
+
     ::wcscpy_s(this->iconData.szTip, 255, title.c_str());
 
     Shell_NotifyIcon(NIM_ADD, &this->iconData);
