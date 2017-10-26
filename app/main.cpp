@@ -29,13 +29,27 @@ int CALLBACK wWinMain(HINSTANCE instance, HINSTANCE prev, LPWSTR args, int showT
         }
     });
 
-    MSG msg = { };
+    trayMenu.setPopupMenuChangedCallback([](bool visible) {
+        for (auto overlay : overlays) {
+            if (visible) {
+                overlay.second->killTimer();
+            }
+            else {
+                overlay.second->startTimer();
+            }
+        }
+    });
+
+    MSG msg = {};
     while (GetMessage(&msg, nullptr, 0, 0)) {
         TranslateMessage(&msg);
         DispatchMessage(&msg);
     }
 
     dimmer::saveConfig();
+
+    monitors.clear();
+    overlays.clear();
 
     return 0;
 }

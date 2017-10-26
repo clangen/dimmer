@@ -7,6 +7,7 @@ using namespace dimmer;
 using namespace nlohmann;
 
 static std::map<std::wstring, float> monitorToOpacity;
+static bool pollingEnabled = false;
 
 static std::wstring getConfigFilename() {
     return getDataDirectory() + L"\\config.json";
@@ -46,6 +47,16 @@ namespace dimmer {
 
     void setMonitorOpacity(Monitor& monitor, float opacity) {
         monitorToOpacity[monitor.getId()] = opacity;
+        saveConfig();
+    }
+
+    bool isPollingEnabled() {
+        return pollingEnabled;
+    }
+
+    void setPollingEnabled(bool enabled) {
+        pollingEnabled = enabled;
+        saveConfig();
     }
 
     void loadConfig() {
@@ -60,6 +71,11 @@ namespace dimmer {
                     monitorToOpacity[key] = value;
                 }
             }
+
+            auto g = j.find("general");
+            if (g != j.end()) {
+                pollingEnabled = (*g).value("pollingEnabled", false);
+            }
         }
         catch (...) {
             /* move on... */
@@ -73,6 +89,8 @@ namespace dimmer {
         for (auto it : monitorToOpacity) {
             m[u16to8(it.first).c_str()] = it.second;
         }
+
+        j["general"] = { { "pollingEnabled", pollingEnabled } };
 
         stringToFile(getConfigFilename(), j.dump(2));
     }

@@ -5,11 +5,14 @@
 
 namespace dimmer {
     class TrayMenu {
-        using MonitorsChanged = std::function<void ()>;
+        using MonitorsChanged = std::function<void()>;
+        using PopupMenuChanged = std::function<void(bool)>;
 
         public:
             TrayMenu(HINSTANCE instance, MonitorsChanged callback);
             ~TrayMenu();
+
+            void setPopupMenuChangedCallback(PopupMenuChanged callback);
 
         private:
             void initIcon();
@@ -25,5 +28,6 @@ namespace dimmer {
             HWND hwnd;
             NOTIFYICONDATA iconData;
             MonitorsChanged monitorsChanged;
+            PopupMenuChanged popupMenuChanged;
     };
 }

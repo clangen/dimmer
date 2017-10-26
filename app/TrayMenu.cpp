@@ -8,6 +8,7 @@ using namespace dimmer;
 
 #define WM_TRAYICON (WM_USER + 2000)
 #define MENU_ID_EXIT 500
+#define MENU_ID_POLL 501
 #define MENU_ID_MONITOR_BASE 1000
 
 constexpr wchar_t className[] = L"DimmerTrayMenuClass";
@@ -50,8 +51,11 @@ static HMENU createMenu() {
             m.getName().c_str());
     }
 
+    bool poll = isPollingEnabled();
     AppendMenu(menu, MF_SEPARATOR, 0, L"-");
-    AppendMenu(menu, 0, MENU_ID_EXIT, L"Exit");
+    AppendMenu(menu, poll ? MF_CHECKED : MF_UNCHECKED, MENU_ID_POLL, L"dim popups");
+    AppendMenu(menu, MF_SEPARATOR, 0, L"-");
+    AppendMenu(menu, 0, MENU_ID_EXIT, L"exit");
     return menu;
 }
 
@@ -60,6 +64,11 @@ LRESULT CALLBACK TrayMenu::windowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM
         case WM_TRAYICON: {
             auto type = LOWORD(lParam);
             if (type == WM_LBUTTONUP || type == WM_RBUTTONUP) {
+                auto instance = hwndToInstance.find(hwnd)->second;
+                if (instance->popupMenuChanged) {
+                    instance->popupMenuChanged(true);
+                }
+
                 menu = createMenu();
 
                 /* SetForegroundWindow + PostMessage(WM_NULL) is a hack to prevent
@@ -68,9 +77,38 @@ LRESULT CALLBACK TrayMenu::windowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM
 
                 POINT cursor = { };
                 ::GetCursorPos(&cursor);
-                TrackPopupMenuEx(menu, 0, cursor.x, cursor.y, hwnd, nullptr);
+
+                /* TPM_RETURNCMD instructs this call to take over the message loop,
+                and effectively wait, for the user to make a selection. */
+                DWORD id = (DWORD) TrackPopupMenuEx(
+                    menu, TPM_RETURNCMD, cursor.x, cursor.y, hwnd, nullptr);
 
                 PostMessage(hwnd, WM_NULL, 0, 0);
+
+                /* process the selection... */
+                if (id == MENU_ID_EXIT) {
+                    PostQuitMessage(0);
+                    return 1;
+                }
+                else if (id == MENU_ID_POLL) {
+                    setPollingEnabled(!isPollingEnabled());
+                    hwndToInstance.find(hwnd)->second->notify();
+                }
+                else if (id >= MENU_ID_MONITOR_BASE) {
+                    auto index = (id / MENU_ID_MONITOR_BASE) - 1;
+                    auto value = id - (MENU_ID_MONITOR_BASE * (index + 1));
+                    float opacity = (float)value / 100;
+                    auto monitors = queryMonitors();
+                    if (monitors.size() > (size_t)index) {
+                        auto monitor = monitors[index];
+                        setMonitorOpacity(monitor, opacity);
+                        hwndToInstance.find(hwnd)->second->notify();
+                    }
+                }
+
+                if (instance->popupMenuChanged) {
+                    instance->popupMenuChanged(false);
+                }
             }
             return 0;
         }
@@ -78,28 +116,6 @@ LRESULT CALLBACK TrayMenu::windowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM
         case WM_DISPLAYCHANGE: {
             hwndToInstance.find(hwnd)->second->notify();
             break;
-        }
-
-        case WM_COMMAND: {
-            if (HIWORD(wParam) == 0) {
-                auto id = LOWORD(wParam);
-                if (id == MENU_ID_EXIT) {
-                    PostQuitMessage(0);
-                    return 1;
-                }
-                else if (id >= MENU_ID_MONITOR_BASE) {
-                    auto index = (id / MENU_ID_MONITOR_BASE) - 1;
-                    auto value = id - (MENU_ID_MONITOR_BASE * (index + 1));
-                    float opacity = (float)value / 100;
-                    auto monitors = queryMonitors();
-                    if (monitors.size() > (size_t) index) {
-                        auto monitor = monitors[index];
-                        setMonitorOpacity(monitor, opacity);
-                        hwndToInstance.find(hwnd)->second->notify();
-                        saveConfig();
-                    }
-                }
-            }
         }
     }
 
@@ -178,4 +194,8 @@ void TrayMenu::initIcon() {
     Shell_NotifyIcon(NIM_ADD, &this->iconData);
     this->iconData.uVersion = NOTIFYICON_VERSION;
     Shell_NotifyIcon(NIM_SETVERSION, &this->iconData);
+}
+
+void TrayMenu::setPopupMenuChangedCallback(PopupMenuChanged callback) {
+    this->popupMenuChanged = callback;
 }
