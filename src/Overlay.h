@@ -50,6 +50,7 @@ namespace dimmer {
             static LRESULT CALLBACK windowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
             Monitor monitor;
+            HBRUSH bgBrush;
             UINT_PTR timerId;
             HWND hwnd;
     };

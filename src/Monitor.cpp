@@ -40,8 +40,13 @@
 using namespace dimmer;
 using namespace nlohmann;
 
+constexpr float DEFAULT_OPACITY = 0.3f;
+constexpr COLORREF DEFAULT_COLOR = RGB(0, 0, 0);
+
 static std::map<std::wstring, float> monitorToOpacity;
+static std::map<std::wstring, COLORREF> monitorToColor;
 static bool pollingEnabled = false;
+static bool globalEnabled = true;
 
 static std::wstring getConfigFilename() {
     return getDataDirectory() + L"\\config.json";
@@ -69,18 +74,29 @@ namespace dimmer {
 
     float getMonitorOpacity(Monitor& monitor, float defaultOpacity) {
         auto it = monitorToOpacity.find(monitor.getId());
-        auto end = monitorToOpacity.end();
-
-        if (it == end) {
+        if (it == monitorToOpacity.end()) {
             setMonitorOpacity(monitor, defaultOpacity);
             return defaultOpacity;
         }
-
         return it->second;
     }
 
     void setMonitorOpacity(Monitor& monitor, float opacity) {
         monitorToOpacity[monitor.getId()] = opacity;
+        saveConfig();
+    }
+
+    DWORD getMonitorColor(Monitor& monitor, COLORREF defaultColor) {
+        auto it = monitorToColor.find(monitor.getId());
+        if (it == monitorToColor.end()) {
+            setMonitorColor(monitor, defaultColor);
+            return defaultColor;
+        }
+        return it->second;
+    }
+
+    void setMonitorColor(Monitor& monitor, COLORREF color) {
+        monitorToColor[monitor.getId()] = color;
         saveConfig();
     }
 
@@ -93,6 +109,17 @@ namespace dimmer {
         saveConfig();
     }
 
+    extern bool isDimmerEnabled() {
+        return globalEnabled;
+    }
+
+    extern void setDimmerEnabled(bool enabled) {
+        if (globalEnabled != enabled) {
+            globalEnabled = enabled;
+            saveConfig();
+        }
+    }
+
     void loadConfig() {
         std::string config = fileToString(getConfigFilename());
         try {
@@ -101,14 +128,15 @@ namespace dimmer {
             if (m != j.end()) {
                 for (auto it = (*m).begin(); it != (*m).end(); ++it) {
                     std::wstring key = u8to16(it.key());
-                    float value = it.value();
-                    monitorToOpacity[key] = value;
+                    monitorToOpacity[key] = it.value().value<float>("opacity", DEFAULT_OPACITY);
+                    monitorToColor[key] = it.value().value<int>("color", DEFAULT_COLOR);
                 }
             }
 
             auto g = j.find("general");
             if (g != j.end()) {
                 pollingEnabled = (*g).value("pollingEnabled", false);
+                globalEnabled = (*g).value("globalEnabled", true);
             }
         }
         catch (...) {
@@ -118,13 +146,20 @@ namespace dimmer {
 
     void saveConfig() {
         json j = { { "monitors", { } } };
-
         json& m = j["monitors"];
-        for (auto it : monitorToOpacity) {
-            m[u16to8(it.first).c_str()] = it.second;
+
+        auto monitors = queryMonitors();
+        for (auto monitor : monitors) {
+            m[u16to8(monitor.getId())] = {
+                { "opacity", getMonitorOpacity(monitor) },
+                { "color", getMonitorColor(monitor) }
+            };
         }
 
-        j["general"] = { { "pollingEnabled", pollingEnabled } };
+        j["general"] = {
+            { "globalEnabled", globalEnabled },
+            { "pollingEnabled", pollingEnabled }
+        };
 
         stringToFile(getConfigFilename(), j.dump(2));
     }

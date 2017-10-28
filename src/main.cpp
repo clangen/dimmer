@@ -33,6 +33,7 @@
 //////////////////////////////////////////////////////////////////////////////
 
 #include <Windows.h>
+#include <Commctrl.h>
 #include <string>
 #include <vector>
 #include <map>
@@ -43,22 +44,28 @@
 #include "TrayMenu.h"
 #include "Util.h"
 
+#pragma comment(linker,"/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
+
 using OverlayPtr = std::shared_ptr<dimmer::Overlay>;
 static std::map<std::wstring, OverlayPtr> overlays;
 static std::vector<dimmer::Monitor> monitors;
 
 int CALLBACK wWinMain(HINSTANCE instance, HINSTANCE prev, LPWSTR args, int showType) {
+    InitCommonControlsEx(nullptr);
+
     dimmer::loadConfig();
 
     dimmer::TrayMenu trayMenu(instance, [instance]() {
         monitors = dimmer::queryMonitors();
         overlays.clear();
 
-        for (auto monitor : monitors) {
-            if (dimmer::getMonitorOpacity(monitor) > 0.0f) {
-                auto overlay = std::make_shared<dimmer::Overlay>(instance, monitor);
-                std::wstring name = monitor.info.szDevice;
-                overlays[name] = overlay;
+        if (dimmer::isDimmerEnabled()) {
+            for (auto monitor : monitors) {
+                if (dimmer::getMonitorOpacity(monitor) > 0.0f) {
+                    auto overlay = std::make_shared<dimmer::Overlay>(instance, monitor);
+                    std::wstring name = monitor.info.szDevice;
+                    overlays[name] = overlay;
+                }
             }
         }
     });

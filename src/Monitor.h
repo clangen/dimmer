@@ -48,11 +48,11 @@ namespace dimmer {
             GetMonitorInfo(handle, &this->info);
         }
 
-        std::wstring getId() {
+        std::wstring getId() const {
             return std::wstring(this->info.szDevice) + L"-" + std::to_wstring(index);
         }
 
-        std::wstring getName() {
+        std::wstring getName() const {
             std::wstring name = this->info.szDevice;
             auto pos = name.find(L"\\\\.\\");
             if (pos == 0) {
@@ -69,8 +69,12 @@ namespace dimmer {
     extern std::vector<Monitor> queryMonitors();
     extern float getMonitorOpacity(Monitor& monitor, float defaultOpacity = 0.30f);
     extern void setMonitorOpacity(Monitor& monitor, float opacity);
+    extern DWORD getMonitorColor(Monitor& monitor, COLORREF defaultColor = RGB(0, 0, 0));
+    extern void setMonitorColor(Monitor& monitor, COLORREF color);
     extern bool isPollingEnabled();
     extern void setPollingEnabled(bool enabled);
+    extern bool isDimmerEnabled();
+    extern void setDimmerEnabled(bool enabled);
     extern void loadConfig();
     extern void saveConfig();
 }

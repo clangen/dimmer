@@ -45,15 +45,10 @@ constexpr int timerTickMs = 10;
 constexpr wchar_t className[] = L"DimmerOverlayClass";
 constexpr wchar_t windowTitle[] = L"DimmerOverlayWindow";
 
-static HBRUSH bgBrush = nullptr;
 static ATOM overlayClass = 0;
 static std::map<HWND, Overlay*> hwndToOverlay;
 
 static void registerClass(HINSTANCE instance, WNDPROC wndProc) {
-    if (!bgBrush) {
-        bgBrush = CreateSolidBrush(RGB(0, 0, 0));
-    }
-
     if (!overlayClass) {
         WNDCLASS wc = {};
         wc.lpfnWndProc = wndProc;
@@ -67,6 +62,8 @@ Overlay::Overlay(HINSTANCE instance, Monitor monitor)
 : monitor(monitor)
 , timerId(0) {
     registerClass(instance, &Overlay::windowProc);
+
+    this->bgBrush = CreateSolidBrush(getMonitorColor(monitor, RGB(0, 0, 0)));
 
     this->hwnd =
         CreateWindowEx(
@@ -103,6 +100,7 @@ Overlay::~Overlay() {
     this->killTimer();
     DestroyWindow(this->hwnd);
     hwndToOverlay.erase(hwndToOverlay.find(this->hwnd));
+    DeleteObject(this->bgBrush);
 }
 
 void Overlay::startTimer() {
@@ -119,21 +117,23 @@ void Overlay::killTimer() {
 }
 
 LRESULT CALLBACK Overlay::windowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
-    switch (msg) {
-        case WM_PAINT: {
-            PAINTSTRUCT ps;
-            HDC hdc = BeginPaint(hwnd, &ps);
-            FillRect(hdc, &ps.rcPaint, bgBrush);
-            EndPaint(hwnd, &ps);
-            return 0;
-        }
+    auto overlay = hwndToOverlay.find(hwnd);
 
-        case WM_TIMER: {
-            auto overlay = hwndToOverlay.find(hwnd);
-            auto end = hwndToOverlay.end();
-            if (overlay != end && wParam == overlay->second->timerId) {
-                BringWindowToTop(hwnd);
+    if (overlay != hwndToOverlay.end()) {
+        switch (msg) {
+            case WM_PAINT: {
+                PAINTSTRUCT ps;
+                HDC hdc = BeginPaint(hwnd, &ps);
+                FillRect(hdc, &ps.rcPaint, overlay->second->bgBrush);
+                EndPaint(hwnd, &ps);
                 return 0;
+            }
+
+            case WM_TIMER: {
+                if (wParam == overlay->second->timerId) {
+                    BringWindowToTop(hwnd);
+                    return 0;
+                }
             }
         }
     }

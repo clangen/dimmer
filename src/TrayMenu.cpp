@@ -35,28 +35,65 @@
 #include "TrayMenu.h"
 #include "Monitor.h"
 #include "resource.h"
+#include <Commdlg.h>
 #include <shellapi.h>
 #include <map>
+#include <memory>
+#include <algorithm>
 
 using namespace dimmer;
 
 #define WM_TRAYICON (WM_USER + 2000)
 #define MENU_ID_EXIT 500
 #define MENU_ID_POLL 501
+#define MENU_ID_ENABLED 502
 #define MENU_ID_MONITOR_BASE 1000
+#define MENU_ID_MONITOR_USER 100
+#define MENU_ID_MONITOR_COLOR 1
 
-constexpr wchar_t version[] = L"v0.1";
+constexpr wchar_t version[] = L"v0.2";
 constexpr wchar_t className[] = L"DimmerTrayMenuClass";
 constexpr wchar_t windowTitle[] = L"DimmerTrayMenuWindow";
 constexpr int offscreen = -32000;
+
 static ATOM overlayClass = 0;
 static HICON trayIcon = nullptr;
 static HMENU menu = nullptr;
 static std::map<HWND, TrayMenu*> hwndToInstance;
+static std::map<std::wstring, HBITMAP> colorBitmaps;
+static COLORREF cachedColors[16];
 
-static HMENU createMenu() {
+static void clearBitmapCache() {
+    for (auto it : colorBitmaps) {
+        DeleteObject(it.second);
+    }
+    colorBitmaps.clear();
+}
+
+static HBITMAP cacheBitmap(HWND hwnd, Monitor& monitor) {
+    HDC hdc = GetDC(hwnd);
+
+    HBITMAP bitmap = CreateCompatibleBitmap(hdc, 16, 16);
+
+    HDC hdcMem = CreateCompatibleDC(hdc);
+    HBITMAP oldBitmap = (HBITMAP)SelectObject(hdcMem, bitmap);
+    RECT size = { 0, 0, 16, 16 };
+    HBRUSH brush = CreateSolidBrush(getMonitorColor(monitor));
+    FillRect(hdcMem, &size, brush);
+    SelectObject(hdcMem, oldBitmap);
+    DeleteObject(brush);
+    DeleteDC(hdcMem);
+
+    ReleaseDC(hwnd, hdc);
+
+    colorBitmaps[monitor.getId()] = bitmap;
+    return bitmap;
+}
+
+static HMENU createMenu(HWND hwnd) {
     if (menu) {
         DestroyMenu(menu);
+        clearBitmapCache();
     }
 
     menu = CreatePopupMenu();
@@ -67,44 +104,109 @@ static HMENU createMenu() {
         const int checkedValue = (int) round(getMonitorOpacity(m) * 100.0f);
 
         UINT_PTR baseId = (MENU_ID_MONITOR_BASE * i++);
+        UINT_PTR menuId;
         HMENU submenu = CreatePopupMenu();
         for (int j = 0; j < 10; j++) {
             const int currentValue = j * 10;
 
             const std::wstring title = (j == 0)
-                ? L"off"
+                ? L"disabled"
                 : std::to_wstring(currentValue) + L"%";
 
             UINT flags = (currentValue == checkedValue) ? MF_CHECKED : 0;
-            AppendMenu(submenu, flags, baseId + (j * 10), title.c_str());
+            menuId = baseId + (j * 10);
+            AppendMenu(submenu, flags, menuId, title.c_str());
         }
 
+        AppendMenu(submenu, MF_SEPARATOR, 0, L"-");
+
+        menuId = baseId + MENU_ID_MONITOR_USER + 1;
+        HBITMAP bitmap = cacheBitmap(hwnd, m);
+        AppendMenu(submenu, 0, menuId, L"color");
+        SetMenuItemBitmaps(submenu, menuId, MF_BYCOMMAND, bitmap, bitmap);
+
+        UINT submenuEnabled = isDimmerEnabled() ? MF_ENABLED : MF_DISABLED;
         AppendMenu(
             menu,
-            MF_POPUP,
+            MF_POPUP | submenuEnabled,
             reinterpret_cast<UINT_PTR>(submenu),
             m.getName().c_str());
     }
 
     bool poll = isPollingEnabled();
     AppendMenu(menu, MF_SEPARATOR, 0, L"-");
+    AppendMenu(menu, isDimmerEnabled() ? MF_CHECKED : MF_UNCHECKED, MENU_ID_ENABLED, L"enabled");
     AppendMenu(menu, poll ? MF_CHECKED : MF_UNCHECKED, MENU_ID_POLL, L"dim popups");
     AppendMenu(menu, MF_SEPARATOR, 0, L"-");
     AppendMenu(menu, 0, MENU_ID_EXIT, L"exit");
     return menu;
 }
 
+static UINT_PTR CALLBACK chooseColorHook(HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam) {
+    if (msg == WM_INITDIALOG) {
+        CHOOSECOLOR* cc = (CHOOSECOLOR*)lParam;
+        Monitor* monitor = (Monitor*)(cc->lCustData);
+
+        RECT monitorRect = monitor->info.rcMonitor;
+        RECT dialogRect = { };
+        GetWindowRect(dlg, &dialogRect);
+
+        /* center the color chooser in the selected monitor */
+
+        auto xOffset =
+            monitorRect.left +
+            ((monitorRect.right - monitorRect.left) / 2) -
+            ((dialogRect.right - dialogRect.left) / 2);
+
+        auto yOffset =
+            monitorRect.top +
+            ((monitorRect.bottom - monitorRect.top) / 2) -
+            ((dialogRect.bottom - dialogRect.top) / 2);
+
+        SetWindowPos(dlg, 0, xOffset, yOffset, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
+
+        return 0;
+    }
+    return 0;
+}
+
+static bool chooseColor(HWND hwnd, Monitor& monitor, int index, COLORREF& target) {
+    CHOOSECOLOR cc = { 0 };
+    cc.lStructSize = sizeof(CHOOSECOLOR);
+    cc.hwndOwner = nullptr;
+    cc.rgbResult = target;
+    cc.Flags = CC_RGBINIT | CC_ENABLEHOOK | CC_ANYCOLOR | CC_FULLOPEN;
+    cc.lpCustColors = cachedColors;
+    cc.lpfnHook = &chooseColorHook;
+    cc.lCustData = (LPARAM)(&monitor);
+
+    BOOL result = ChooseColor(&cc);
+    if (result) {
+        target = cc.rgbResult;
+        if (index < 16) {
+            cachedColors[index] = cc.rgbResult;
+        }
+    }
+
+    return !!result;
+}
+
 LRESULT CALLBACK TrayMenu::windowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
         case WM_TRAYICON: {
             auto type = LOWORD(lParam);
+            if (type == WM_MBUTTONUP) {
+                setDimmerEnabled(!isDimmerEnabled());
+                hwndToInstance.find(hwnd)->second->notify();
+                return 1;
+            }
             if (type == WM_LBUTTONUP || type == WM_RBUTTONUP) {
                 auto instance = hwndToInstance.find(hwnd)->second;
                 if (instance->popupMenuChanged) {
                     instance->popupMenuChanged(true);
                 }
 
-                menu = createMenu();
+                menu = createMenu(instance->hwnd);
 
                 /* SetForegroundWindow + PostMessage(WM_NULL) is a hack to prevent
                 "sticky popup menu syndrome." i hate you, win32api. */
@@ -129,16 +231,38 @@ LRESULT CALLBACK TrayMenu::windowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM
                     setPollingEnabled(!isPollingEnabled());
                     hwndToInstance.find(hwnd)->second->notify();
                 }
+                else if (id == MENU_ID_ENABLED) {
+                    setDimmerEnabled(!isDimmerEnabled());
+                    hwndToInstance.find(hwnd)->second->notify();
+                }
                 else if (id >= MENU_ID_MONITOR_BASE) {
                     auto index = (id / MENU_ID_MONITOR_BASE) - 1;
-                    auto value = id - (MENU_ID_MONITOR_BASE * (index + 1));
-                    float opacity = (float)value / 100;
                     auto monitors = queryMonitors();
-                    if (monitors.size() > (size_t)index) {
-                        auto monitor = monitors[index];
-                        setMonitorOpacity(monitor, opacity);
-                        hwndToInstance.find(hwnd)->second->notify();
+
+                    if (monitors.size() <= (size_t) index) {
+                        return 1;
                     }
+
+                    auto monitor = monitors[index];
+
+                    auto value = id - (MENU_ID_MONITOR_BASE * (index + 1));
+                    /* if above MENU_ID_MONITOR_USER it's not one of the % toggles */
+                    if (value >= MENU_ID_MONITOR_USER) {
+                        COLORREF color = getMonitorColor(monitor);
+                        if (chooseColor(instance->hwnd, monitor, index, color)) {
+                            setMonitorColor(monitor, color);
+                        }
+                        else {
+                            return 1;
+                        }
+                    }
+                    /* else it's a dim% value */
+                    else {
+                        float opacity = (float)value / 100;
+                        setMonitorOpacity(monitor, opacity);
+                    }
+
+                    hwndToInstance.find(hwnd)->second->notify();
                 }
 
                 if (instance->popupMenuChanged) {
@@ -170,6 +294,12 @@ static void registerClass(HINSTANCE instance, WNDPROC wndProc) {
         wc.hInstance = instance;
         wc.lpszClassName = className;
         overlayClass = RegisterClass(&wc);
+
+        memset(cachedColors, 0, sizeof(COLORREF) * 16);
+        auto monitors = queryMonitors();
+        for (size_t i = 0; i < std::min((size_t) 16, monitors.size()); i++) {
+            cachedColors[i] = getMonitorColor(monitors[i]);
+        }
     }
 }
 
