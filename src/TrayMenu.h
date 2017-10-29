@@ -34,6 +34,7 @@
 
 #pragma once
 
+#include "Monitor.h"
 #include <functional>
 #include <Windows.h>
 #include <Shellapi.h>
@@ -58,9 +59,20 @@ namespace dimmer {
                 }
             }
 
-            static LRESULT CALLBACK windowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
+            bool chooseColor(
+                HWND hwnd, Monitor& monitor, int index, COLORREF& target);
+
+            static LRESULT CALLBACK windowProc(
+                HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+            static UINT_PTR CALLBACK chooseColorHook(
+                HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam);
+
+            static LRESULT CALLBACK colorWindowProc(
+                HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam, UINT_PTR id, DWORD_PTR data);
 
             HWND hwnd;
+            bool dialogVisible;
             NOTIFYICONDATA iconData;
             MonitorsChanged monitorsChanged;
             PopupMenuChanged popupMenuChanged;

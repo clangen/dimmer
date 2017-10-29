@@ -36,6 +36,7 @@
 #include "Monitor.h"
 #include "resource.h"
 #include <Commdlg.h>
+#include <CommCtrl.h>
 #include <shellapi.h>
 #include <map>
 #include <memory>
@@ -50,6 +51,7 @@ using namespace dimmer;
 #define MENU_ID_MONITOR_BASE 1000
 #define MENU_ID_MONITOR_USER 100
 #define MENU_ID_MONITOR_COLOR 1
+#define COLOR_PICKER_SELECTED_COLOR_HWND_ID 709
 
 constexpr wchar_t version[] = L"v0.2";
 constexpr wchar_t className[] = L"DimmerTrayMenuClass";
@@ -62,6 +64,12 @@ static HMENU menu = nullptr;
 static std::map<HWND, TrayMenu*> hwndToInstance;
 static std::map<std::wstring, HBITMAP> colorBitmaps;
 static COLORREF cachedColors[16];
+
+struct ColorProcContext {
+    TrayMenu* instance;
+    Monitor* monitor;
+    CHOOSECOLOR* data;
+};
 
 static void clearBitmapCache() {
     for (auto it : colorBitmaps) {
@@ -142,145 +150,6 @@ static HMENU createMenu(HWND hwnd) {
     return menu;
 }
 
-static UINT_PTR CALLBACK chooseColorHook(HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam) {
-    if (msg == WM_INITDIALOG) {
-        CHOOSECOLOR* cc = (CHOOSECOLOR*)lParam;
-        Monitor* monitor = (Monitor*)(cc->lCustData);
-
-        RECT monitorRect = monitor->info.rcMonitor;
-        RECT dialogRect = { };
-        GetWindowRect(dlg, &dialogRect);
-
-        /* center the color chooser in the selected monitor */
-
-        auto xOffset =
-            monitorRect.left +
-            ((monitorRect.right - monitorRect.left) / 2) -
-            ((dialogRect.right - dialogRect.left) / 2);
-
-        auto yOffset =
-            monitorRect.top +
-            ((monitorRect.bottom - monitorRect.top) / 2) -
-            ((dialogRect.bottom - dialogRect.top) / 2);
-
-        SetWindowPos(dlg, 0, xOffset, yOffset, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
-
-        return 0;
-    }
-    return 0;
-}
-
-static bool chooseColor(HWND hwnd, Monitor& monitor, int index, COLORREF& target) {
-    CHOOSECOLOR cc = { 0 };
-    cc.lStructSize = sizeof(CHOOSECOLOR);
-    cc.hwndOwner = nullptr;
-    cc.rgbResult = target;
-    cc.Flags = CC_RGBINIT | CC_ENABLEHOOK | CC_ANYCOLOR | CC_FULLOPEN;
-    cc.lpCustColors = cachedColors;
-    cc.lpfnHook = &chooseColorHook;
-    cc.lCustData = (LPARAM)(&monitor);
-
-    BOOL result = ChooseColor(&cc);
-    if (result) {
-        target = cc.rgbResult;
-        if (index < 16) {
-            cachedColors[index] = cc.rgbResult;
-        }
-    }
-
-    return !!result;
-}
-
-LRESULT CALLBACK TrayMenu::windowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
-    switch (msg) {
-        case WM_TRAYICON: {
-            auto type = LOWORD(lParam);
-            if (type == WM_MBUTTONUP) {
-                setDimmerEnabled(!isDimmerEnabled());
-                hwndToInstance.find(hwnd)->second->notify();
-                return 1;
-            }
-            if (type == WM_LBUTTONUP || type == WM_RBUTTONUP) {
-                auto instance = hwndToInstance.find(hwnd)->second;
-                if (instance->popupMenuChanged) {
-                    instance->popupMenuChanged(true);
-                }
-
-                menu = createMenu(instance->hwnd);
-
-                /* SetForegroundWindow + PostMessage(WM_NULL) is a hack to prevent
-                "sticky popup menu syndrome." i hate you, win32api. */
-                ::SetForegroundWindow(hwnd);
-
-                POINT cursor = { };
-                ::GetCursorPos(&cursor);
-
-                /* TPM_RETURNCMD instructs this call to take over the message loop,
-                and effectively wait, for the user to make a selection. */
-                DWORD id = (DWORD) TrackPopupMenuEx(
-                    menu, TPM_RETURNCMD, cursor.x, cursor.y, hwnd, nullptr);
-
-                PostMessage(hwnd, WM_NULL, 0, 0);
-
-                /* process the selection... */
-                if (id == MENU_ID_EXIT) {
-                    PostQuitMessage(0);
-                    return 1;
-                }
-                else if (id == MENU_ID_POLL) {
-                    setPollingEnabled(!isPollingEnabled());
-                    hwndToInstance.find(hwnd)->second->notify();
-                }
-                else if (id == MENU_ID_ENABLED) {
-                    setDimmerEnabled(!isDimmerEnabled());
-                    hwndToInstance.find(hwnd)->second->notify();
-                }
-                else if (id >= MENU_ID_MONITOR_BASE) {
-                    auto index = (id / MENU_ID_MONITOR_BASE) - 1;
-                    auto monitors = queryMonitors();
-
-                    if (monitors.size() <= (size_t) index) {
-                        return 1;
-                    }
-
-                    auto monitor = monitors[index];
-
-                    auto value = id - (MENU_ID_MONITOR_BASE * (index + 1));
-                    /* if above MENU_ID_MONITOR_USER it's not one of the % toggles */
-                    if (value >= MENU_ID_MONITOR_USER) {
-                        COLORREF color = getMonitorColor(monitor);
-                        if (chooseColor(instance->hwnd, monitor, index, color)) {
-                            setMonitorColor(monitor, color);
-                        }
-                        else {
-                            return 1;
-                        }
-                    }
-                    /* else it's a dim% value */
-                    else {
-                        float opacity = (float)value / 100;
-                        setMonitorOpacity(monitor, opacity);
-                    }
-
-                    hwndToInstance.find(hwnd)->second->notify();
-                }
-
-                if (instance->popupMenuChanged) {
-                    instance->popupMenuChanged(false);
-                }
-            }
-            return 0;
-        }
-
-        case WM_DISPLAYCHANGE: {
-            hwndToInstance.find(hwnd)->second->notify();
-            break;
-        }
-    }
-
-    return DefWindowProc(hwnd, msg, wParam, lParam);
-}
-
 static void registerClass(HINSTANCE instance, WNDPROC wndProc) {
     if (!trayIcon) {
         trayIcon = (HICON) ::LoadIconW(
@@ -305,6 +174,7 @@ static void registerClass(HINSTANCE instance, WNDPROC wndProc) {
 
 TrayMenu::TrayMenu(HINSTANCE instance, MonitorsChanged callback) {
     this->monitorsChanged = callback;
+    this->dialogVisible = false;
 
     registerClass(instance, &windowProc);
 
@@ -365,4 +235,221 @@ void TrayMenu::initIcon() {
 
 void TrayMenu::setPopupMenuChangedCallback(PopupMenuChanged callback) {
     this->popupMenuChanged = callback;
+}
+
+LRESULT CALLBACK TrayMenu::colorWindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam, UINT_PTR id, DWORD_PTR data) {
+    if (msg == WM_PAINT) {
+        ColorProcContext* cpc = (ColorProcContext*)data;
+
+        /* allow the dialog to paint itself... */
+        LRESULT result = DefSubclassProc(hwnd, msg, wparam, lparam);
+
+        /* then get our HWND and pick the middle point. */
+        HDC hdc = GetDC(hwnd);
+
+        RECT rect = {};
+        GetWindowRect(hwnd, &rect);
+
+        int x = (rect.right - rect.left) / 2;
+        int y = (rect.bottom - rect.top) / 2;
+
+        /* snag the current color, set it, and notify */
+        COLORREF bg = GetPixel(hdc, x, y);
+        if (bg != CLR_INVALID) {
+            setMonitorColor(*cpc->monitor, bg);
+            cpc->instance->notify();
+        }
+
+        ReleaseDC(hwnd, hdc);
+
+        return result;
+    }
+
+    return DefSubclassProc(hwnd, msg, wparam, lparam);
+}
+
+UINT_PTR CALLBACK TrayMenu::chooseColorHook(HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam) {
+    if (msg == WM_INITDIALOG) {
+        ColorProcContext* cpc = (ColorProcContext*)((CHOOSECOLOR*)lParam)->lCustData;
+        Monitor* monitor = (Monitor*)(cpc->monitor);
+
+        RECT monitorRect = monitor->info.rcMonitor;
+        RECT dialogRect = {};
+        GetWindowRect(dlg, &dialogRect);
+
+        /* center the color chooser in the selected monitor */
+
+        auto xOffset =
+            monitorRect.left +
+            ((monitorRect.right - monitorRect.left) / 2) -
+            ((dialogRect.right - dialogRect.left) / 2);
+
+        auto yOffset =
+            monitorRect.top +
+            ((monitorRect.bottom - monitorRect.top) / 2) -
+            ((dialogRect.bottom - dialogRect.top) / 2);
+
+        SetWindowPos(dlg, 0, xOffset, yOffset, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
+
+        /* COLOR_PICKER_SELECTED_COLOR_HWND_ID was discovered with Spy++ */
+        HWND colorHwnd = GetDlgItem(dlg, COLOR_PICKER_SELECTED_COLOR_HWND_ID);
+        if (colorHwnd) {
+            SetWindowSubclass(
+                colorHwnd,
+                &TrayMenu::colorWindowProc,
+                1001,
+                (DWORD_PTR)cpc);
+        }
+
+        return 0;
+    }
+
+    return 0;
+}
+
+bool TrayMenu::chooseColor(HWND hwnd, Monitor& monitor, int index, COLORREF& target) {
+    ColorProcContext cpc = { 0 };
+    CHOOSECOLOR cc = { 0 };
+
+    cc.lStructSize = sizeof(CHOOSECOLOR);
+    cc.hwndOwner = nullptr;
+    cc.rgbResult = target;
+    cc.Flags = CC_RGBINIT | CC_ENABLEHOOK | CC_ANYCOLOR | CC_FULLOPEN;
+    cc.lpCustColors = cachedColors;
+    cc.lpfnHook = &TrayMenu::chooseColorHook;
+    cc.lCustData = (LPARAM)(&cpc);
+
+    cpc.instance = this;
+    cpc.monitor = &monitor;
+    cpc.data = &cc;
+
+    COLORREF original = getMonitorColor(monitor);
+
+    /* polling screws with our automatic update because it messes
+    with Z-order, which causes certain dialog events to get funky.
+    turn it off, we'll turn it back on after adjsuting. */
+    bool pollingEnabled = isPollingEnabled();
+    if (pollingEnabled) {
+        setPollingEnabled(false);
+        this->notify();
+    }
+
+    /* shows the dialog, blocks until complete */
+    this->dialogVisible = true;
+    BOOL result = ChooseColor(&cc);
+    this->dialogVisible = false;
+
+    /* re-enable polling if necessary! */
+    if (pollingEnabled) {
+        setPollingEnabled(pollingEnabled);
+        this->notify();
+    }
+
+    if (result) {
+        target = cc.rgbResult;
+        if (index < 16) {
+            cachedColors[index] = cc.rgbResult;
+        }
+    }
+    else {
+        target = original;
+    }
+
+    return !!result;
+}
+
+LRESULT CALLBACK TrayMenu::windowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    switch (msg) {
+        case WM_TRAYICON: {
+            auto instance = hwndToInstance.find(hwnd)->second;
+
+            if (instance->dialogVisible) {
+                return 1;
+            }
+
+            auto type = LOWORD(lParam);
+
+            if (type == WM_MBUTTONUP) {
+                setDimmerEnabled(!isDimmerEnabled());
+                instance->notify();
+                return 1;
+            }
+            if (type == WM_LBUTTONUP || type == WM_RBUTTONUP) {
+                if (instance->popupMenuChanged) {
+                    instance->popupMenuChanged(true);
+                }
+
+                menu = createMenu(instance->hwnd);
+
+                /* SetForegroundWindow + PostMessage(WM_NULL) is a hack to prevent
+                "sticky popup menu syndrome." i hate you, win32api. */
+                ::SetForegroundWindow(hwnd);
+
+                POINT cursor = {};
+                ::GetCursorPos(&cursor);
+
+                /* TPM_RETURNCMD instructs this call to take over the message loop,
+                and effectively wait, for the user to make a selection. */
+                DWORD id = (DWORD)TrackPopupMenuEx(
+                    menu, TPM_RETURNCMD, cursor.x, cursor.y, hwnd, nullptr);
+
+                PostMessage(hwnd, WM_NULL, 0, 0);
+
+                /* process the selection... */
+                if (id == MENU_ID_EXIT) {
+                    PostQuitMessage(0);
+                    return 1;
+                }
+                else if (id == MENU_ID_POLL) {
+                    setPollingEnabled(!isPollingEnabled());
+                    hwndToInstance.find(hwnd)->second->notify();
+                }
+                else if (id == MENU_ID_ENABLED) {
+                    setDimmerEnabled(!isDimmerEnabled());
+                    hwndToInstance.find(hwnd)->second->notify();
+                }
+                else if (id >= MENU_ID_MONITOR_BASE) {
+                    auto index = (id / MENU_ID_MONITOR_BASE) - 1;
+                    auto monitors = queryMonitors();
+
+                    if (monitors.size() <= (size_t)index) {
+                        return 1;
+                    }
+
+                    auto monitor = monitors[index];
+
+                    auto value = id - (MENU_ID_MONITOR_BASE * (index + 1));
+                    /* if above MENU_ID_MONITOR_USER it's not one of the % toggles */
+                    if (value >= MENU_ID_MONITOR_USER) {
+                        COLORREF color = getMonitorColor(monitor);
+                        if (instance->chooseColor(instance->hwnd, monitor, index, color)) {
+                            setMonitorColor(monitor, color);
+                        }
+                        else {
+                            return 1;
+                        }
+                    }
+                    /* else it's a dim% value */
+                    else {
+                        float opacity = (float)value / 100;
+                        setMonitorOpacity(monitor, opacity);
+                    }
+
+                    hwndToInstance.find(hwnd)->second->notify();
+                }
+
+                if (instance->popupMenuChanged) {
+                    instance->popupMenuChanged(false);
+                }
+            }
+            return 0;
+        }
+
+        case WM_DISPLAYCHANGE: {
+            hwndToInstance.find(hwnd)->second->notify();
+            break;
+        }
+    }
+
+    return DefWindowProc(hwnd, msg, wParam, lParam);
 }
