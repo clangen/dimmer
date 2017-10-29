@@ -69,8 +69,8 @@ namespace dimmer {
     extern std::vector<Monitor> queryMonitors();
     extern float getMonitorOpacity(Monitor& monitor, float defaultOpacity = 0.30f);
     extern void setMonitorOpacity(Monitor& monitor, float opacity);
-    extern DWORD getMonitorColor(Monitor& monitor, COLORREF defaultColor = RGB(0, 0, 0));
-    extern void setMonitorColor(Monitor& monitor, COLORREF color);
+    extern int getMonitorTemperature(Monitor& monitor, int defaultTemperature = -1);
+    extern void setMonitorTemperature(Monitor& monitor, int temperature);
     extern bool isPollingEnabled();
     extern void setPollingEnabled(bool enabled);
     extern bool isDimmerEnabled();

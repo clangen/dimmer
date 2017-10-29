@@ -41,10 +41,10 @@ using namespace dimmer;
 using namespace nlohmann;
 
 constexpr float DEFAULT_OPACITY = 0.3f;
-constexpr COLORREF DEFAULT_COLOR = RGB(0, 0, 0);
+constexpr int DEFAULT_TEMPERATURE = -1;
 
 static std::map<std::wstring, float> monitorToOpacity;
-static std::map<std::wstring, COLORREF> monitorToColor;
+static std::map<std::wstring, int> monitorToTemperature;
 static bool pollingEnabled = false;
 static bool globalEnabled = true;
 
@@ -86,17 +86,17 @@ namespace dimmer {
         saveConfig();
     }
 
-    DWORD getMonitorColor(Monitor& monitor, COLORREF defaultColor) {
-        auto it = monitorToColor.find(monitor.getId());
-        if (it == monitorToColor.end()) {
-            setMonitorColor(monitor, defaultColor);
-            return defaultColor;
+    int getMonitorTemperature(Monitor& monitor, int defaultTemperature) {
+        auto it = monitorToTemperature.find(monitor.getId());
+        if (it == monitorToTemperature.end()) {
+            setMonitorTemperature(monitor, defaultTemperature);
+            return defaultTemperature;
         }
         return it->second;
     }
 
-    void setMonitorColor(Monitor& monitor, COLORREF color) {
-        monitorToColor[monitor.getId()] = color;
+    void setMonitorTemperature(Monitor& monitor, int temperature) {
+        monitorToTemperature[monitor.getId()] = temperature;
         saveConfig();
     }
 
@@ -129,7 +129,7 @@ namespace dimmer {
                 for (auto it = (*m).begin(); it != (*m).end(); ++it) {
                     std::wstring key = u8to16(it.key());
                     monitorToOpacity[key] = it.value().value<float>("opacity", DEFAULT_OPACITY);
-                    monitorToColor[key] = it.value().value<int>("color", DEFAULT_COLOR);
+                    monitorToTemperature[key] = it.value().value<int>("temperature", DEFAULT_TEMPERATURE);
                 }
             }
 
@@ -152,7 +152,7 @@ namespace dimmer {
         for (auto monitor : monitors) {
             m[u16to8(monitor.getId())] = {
                 { "opacity", getMonitorOpacity(monitor) },
-                { "color", getMonitorColor(monitor) }
+                { "temperature", getMonitorTemperature(monitor) }
             };
         }
 

@@ -50,7 +50,13 @@ namespace dimmer {
         private:
             static LRESULT CALLBACK windowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
+            void disableColorTemperature();
+            void updateColorTemperature();
+            void disableBrigthnessOverlay();
+            void updateBrightnessOverlay();
+
             Monitor monitor;
+            HINSTANCE instance;
             HBRUSH bgBrush;
             UINT_PTR timerId;
             HWND hwnd;

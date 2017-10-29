@@ -59,21 +59,19 @@ static void updateOverlays(HINSTANCE instance) {
 
     if (dimmer::isDimmerEnabled()) {
         for (auto monitor : monitors) {
-            if (dimmer::getMonitorOpacity(monitor) > 0.0f) {
-                auto id = monitor.getId();
-                auto it = old.find(monitor.getId());
+            auto id = monitor.getId();
+            auto it = old.find(monitor.getId());
 
-                OverlayPtr overlay;
-                if (it != old.end()) {
-                    overlay = it->second;
-                    overlay->update(monitor);
-                }
-                else {
-                    overlay = std::make_shared<dimmer::Overlay>(instance, monitor);
-                }
-
-                overlays[id] = overlay;
+            OverlayPtr overlay;
+            if (it != old.end()) {
+                overlay = it->second;
+                overlay->update(monitor);
             }
+            else {
+                overlay = std::make_shared<dimmer::Overlay>(instance, monitor);
+            }
+
+            overlays[id] = overlay;
         }
     }
 }

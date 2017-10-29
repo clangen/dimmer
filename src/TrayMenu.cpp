@@ -51,7 +51,12 @@ using namespace dimmer;
 #define MENU_ID_MONITOR_BASE 1000
 #define MENU_ID_MONITOR_USER 100
 #define MENU_ID_MONITOR_COLOR 1
-#define COLOR_PICKER_SELECTED_COLOR_HWND_ID 709
+
+#define MENU_ID_DEFAULTK (MENU_ID_MONITOR_USER + 1)
+#define MENU_ID_4500K (MENU_ID_MONITOR_USER + 2)
+#define MENU_ID_5000K (MENU_ID_MONITOR_USER + 3)
+#define MENU_ID_5500K (MENU_ID_MONITOR_USER + 4)
+#define MENU_ID_6000K (MENU_ID_MONITOR_USER + 5)
 
 constexpr wchar_t version[] = L"v0.2";
 constexpr wchar_t className[] = L"DimmerTrayMenuClass";
@@ -62,8 +67,6 @@ static ATOM overlayClass = 0;
 static HICON trayIcon = nullptr;
 static HMENU menu = nullptr;
 static std::map<HWND, TrayMenu*> hwndToInstance;
-static std::map<std::wstring, HBITMAP> colorBitmaps;
-static COLORREF cachedColors[16];
 
 struct ColorProcContext {
     TrayMenu* instance;
@@ -71,37 +74,13 @@ struct ColorProcContext {
     CHOOSECOLOR* data;
 };
 
-static void clearBitmapCache() {
-    for (auto it : colorBitmaps) {
-        DeleteObject(it.second);
-    }
-    colorBitmaps.clear();
-}
-
-static HBITMAP cacheBitmap(HWND hwnd, Monitor& monitor) {
-    HDC hdc = GetDC(hwnd);
-
-    HBITMAP bitmap = CreateCompatibleBitmap(hdc, 16, 16);
-
-    HDC hdcMem = CreateCompatibleDC(hdc);
-    HBITMAP oldBitmap = (HBITMAP)SelectObject(hdcMem, bitmap);
-    RECT size = { 0, 0, 16, 16 };
-    HBRUSH brush = CreateSolidBrush(getMonitorColor(monitor));
-    FillRect(hdcMem, &size, brush);
-    SelectObject(hdcMem, oldBitmap);
-    DeleteObject(brush);
-    DeleteDC(hdcMem);
-
-    ReleaseDC(hwnd, hdc);
-
-    colorBitmaps[monitor.getId()] = bitmap;
-    return bitmap;
+static UINT checked(int temp, int value) {
+    return (temp == value) ? MF_CHECKED : MF_UNCHECKED;
 }
 
 static HMENU createMenu(HWND hwnd) {
     if (menu) {
         DestroyMenu(menu);
-        clearBitmapCache();
     }
 
     menu = CreatePopupMenu();
@@ -110,10 +89,11 @@ static HMENU createMenu(HWND hwnd) {
     int i = 1;
     for (auto m : monitors) {
         const int checkedValue = (int) round(getMonitorOpacity(m) * 100.0f);
-
         UINT_PTR baseId = (MENU_ID_MONITOR_BASE * i++);
+
+        /* "brightness" submenu */
+        HMENU brightnessMenu = CreatePopupMenu();
         UINT_PTR menuId;
-        HMENU submenu = CreatePopupMenu();
         for (int j = 0; j < 10; j++) {
             const int currentValue = j * 10;
 
@@ -123,21 +103,29 @@ static HMENU createMenu(HWND hwnd) {
 
             UINT flags = (currentValue == checkedValue) ? MF_CHECKED : 0;
             menuId = baseId + (j * 10);
-            AppendMenu(submenu, flags, menuId, title.c_str());
+            AppendMenu(brightnessMenu, flags, menuId, title.c_str());
         }
 
-        AppendMenu(submenu, MF_SEPARATOR, 0, L"-");
+        /* "temperature" submenu */
+        HMENU tempMenu = CreatePopupMenu();
+        const int currentTemp = getMonitorTemperature(m);
+        AppendMenu(tempMenu, checked(currentTemp, -1), baseId + MENU_ID_DEFAULTK, L"default");
+        AppendMenu(tempMenu, checked(currentTemp, 4500), baseId + MENU_ID_4500K, L"4500k");
+        AppendMenu(tempMenu, checked(currentTemp, 5000), baseId + MENU_ID_5000K, L"5000k");
+        AppendMenu(tempMenu, checked(currentTemp, 5500), baseId + MENU_ID_5500K, L"5500k");
+        AppendMenu(tempMenu, checked(currentTemp, 6000), baseId + MENU_ID_6000K, L"6000k");
 
-        menuId = baseId + MENU_ID_MONITOR_USER + 1;
-        HBITMAP bitmap = cacheBitmap(hwnd, m);
-        AppendMenu(submenu, 0, menuId, L"color");
-        SetMenuItemBitmaps(submenu, menuId, MF_BYCOMMAND, bitmap, bitmap);
+        /* brightness, temperature popup */
+        HMENU brightTempMenu = CreatePopupMenu();
+        AppendMenu(brightTempMenu, MF_POPUP, (UINT_PTR) brightnessMenu, L"brightness");
+        AppendMenu(brightTempMenu, MF_POPUP, (UINT_PTR) tempMenu, L"temperature");
 
+        /* main menu */
         UINT submenuEnabled = isDimmerEnabled() ? MF_ENABLED : MF_DISABLED;
         AppendMenu(
             menu,
             MF_POPUP | submenuEnabled,
-            reinterpret_cast<UINT_PTR>(submenu),
+            reinterpret_cast<UINT_PTR>(brightTempMenu),
             m.getName().c_str());
     }
 
@@ -163,12 +151,6 @@ static void registerClass(HINSTANCE instance, WNDPROC wndProc) {
         wc.hInstance = instance;
         wc.lpszClassName = className;
         overlayClass = RegisterClass(&wc);
-
-        memset(cachedColors, 0, sizeof(COLORREF) * 16);
-        auto monitors = queryMonitors();
-        for (size_t i = 0; i < std::min((size_t) 16, monitors.size()); i++) {
-            cachedColors[i] = getMonitorColor(monitors[i]);
-        }
     }
 }
 
@@ -237,127 +219,6 @@ void TrayMenu::setPopupMenuChangedCallback(PopupMenuChanged callback) {
     this->popupMenuChanged = callback;
 }
 
-LRESULT CALLBACK TrayMenu::colorWindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam, UINT_PTR id, DWORD_PTR data) {
-    if (msg == WM_PAINT) {
-        ColorProcContext* cpc = (ColorProcContext*)data;
-
-        /* allow the dialog to paint itself... */
-        LRESULT result = DefSubclassProc(hwnd, msg, wparam, lparam);
-
-        /* then get our HWND and pick the middle point. */
-        HDC hdc = GetDC(hwnd);
-
-        RECT rect = {};
-        GetWindowRect(hwnd, &rect);
-
-        int x = (rect.right - rect.left) / 2;
-        int y = (rect.bottom - rect.top) / 2;
-
-        /* snag the current color, set it, and notify */
-        COLORREF bg = GetPixel(hdc, x, y);
-        if (bg != CLR_INVALID) {
-            setMonitorColor(*cpc->monitor, bg);
-            cpc->instance->notify();
-        }
-
-        ReleaseDC(hwnd, hdc);
-
-        return result;
-    }
-
-    return DefSubclassProc(hwnd, msg, wparam, lparam);
-}
-
-UINT_PTR CALLBACK TrayMenu::chooseColorHook(HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam) {
-    if (msg == WM_INITDIALOG) {
-        ColorProcContext* cpc = (ColorProcContext*)((CHOOSECOLOR*)lParam)->lCustData;
-        Monitor* monitor = (Monitor*)(cpc->monitor);
-
-        RECT monitorRect = monitor->info.rcMonitor;
-        RECT dialogRect = {};
-        GetWindowRect(dlg, &dialogRect);
-
-        /* center the color chooser in the selected monitor */
-
-        auto xOffset =
-            monitorRect.left +
-            ((monitorRect.right - monitorRect.left) / 2) -
-            ((dialogRect.right - dialogRect.left) / 2);
-
-        auto yOffset =
-            monitorRect.top +
-            ((monitorRect.bottom - monitorRect.top) / 2) -
-            ((dialogRect.bottom - dialogRect.top) / 2);
-
-        SetWindowPos(dlg, 0, xOffset, yOffset, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
-
-        /* COLOR_PICKER_SELECTED_COLOR_HWND_ID was discovered with Spy++ */
-        HWND colorHwnd = GetDlgItem(dlg, COLOR_PICKER_SELECTED_COLOR_HWND_ID);
-        if (colorHwnd) {
-            SetWindowSubclass(
-                colorHwnd,
-                &TrayMenu::colorWindowProc,
-                1001,
-                (DWORD_PTR)cpc);
-        }
-
-        return 0;
-    }
-
-    return 0;
-}
-
-bool TrayMenu::chooseColor(HWND hwnd, Monitor& monitor, int index, COLORREF& target) {
-    ColorProcContext cpc = { 0 };
-    CHOOSECOLOR cc = { 0 };
-
-    cc.lStructSize = sizeof(CHOOSECOLOR);
-    cc.hwndOwner = nullptr;
-    cc.rgbResult = target;
-    cc.Flags = CC_RGBINIT | CC_ENABLEHOOK | CC_ANYCOLOR | CC_FULLOPEN;
-    cc.lpCustColors = cachedColors;
-    cc.lpfnHook = &TrayMenu::chooseColorHook;
-    cc.lCustData = (LPARAM)(&cpc);
-
-    cpc.instance = this;
-    cpc.monitor = &monitor;
-    cpc.data = &cc;
-
-    COLORREF original = getMonitorColor(monitor);
-
-    /* polling screws with our automatic update because it messes
-    with Z-order, which causes certain dialog events to get funky.
-    turn it off, we'll turn it back on after adjsuting. */
-    bool pollingEnabled = isPollingEnabled();
-    if (pollingEnabled) {
-        setPollingEnabled(false);
-        this->notify();
-    }
-
-    /* shows the dialog, blocks until complete */
-    this->dialogVisible = true;
-    BOOL result = ChooseColor(&cc);
-    this->dialogVisible = false;
-
-    /* re-enable polling if necessary! */
-    if (pollingEnabled) {
-        setPollingEnabled(pollingEnabled);
-        this->notify();
-    }
-
-    if (result) {
-        target = cc.rgbResult;
-        if (index < 16) {
-            cachedColors[index] = cc.rgbResult;
-        }
-    }
-    else {
-        target = original;
-    }
-
-    return !!result;
-}
-
 LRESULT CALLBACK TrayMenu::windowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
         case WM_TRAYICON: {
@@ -408,7 +269,7 @@ LRESULT CALLBACK TrayMenu::windowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM
                     setDimmerEnabled(!isDimmerEnabled());
                     hwndToInstance.find(hwnd)->second->notify();
                 }
-                else if (id >= MENU_ID_MONITOR_BASE) {
+                else {
                     auto index = (id / MENU_ID_MONITOR_BASE) - 1;
                     auto monitors = queryMonitors();
 
@@ -417,26 +278,33 @@ LRESULT CALLBACK TrayMenu::windowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM
                     }
 
                     auto monitor = monitors[index];
-
                     auto value = id - (MENU_ID_MONITOR_BASE * (index + 1));
-                    /* if above MENU_ID_MONITOR_USER it's not one of the % toggles */
-                    if (value >= MENU_ID_MONITOR_USER) {
-                        COLORREF color = getMonitorColor(monitor);
-                        if (instance->chooseColor(instance->hwnd, monitor, index, color)) {
-                            setMonitorColor(monitor, color);
+
+                    if (value >= MENU_ID_DEFAULTK && value <= MENU_ID_6000K) {
+                        int temperature = -1;
+                        switch (value) {
+                            case MENU_ID_4500K: temperature = 4500; break;
+                            case MENU_ID_5000K: temperature = 5000; break;
+                            case MENU_ID_5500K: temperature = 5500; break;
+                            case MENU_ID_6000K: temperature = 6000; break;
                         }
-                        else {
+                        setMonitorTemperature(monitor, temperature);
+                        hwndToInstance.find(hwnd)->second->notify();
+                    }
+                    else if (id >= MENU_ID_MONITOR_BASE) {
+                        /* if above MENU_ID_MONITOR_USER it's not one of the % toggles */
+                        if (value >= MENU_ID_MONITOR_USER) {
                             return 1;
                         }
+                        /* else it's a dim% value */
+                        else {
+                            float opacity = (float)value / 100;
+                            setMonitorOpacity(monitor, opacity);
+                        }
+                        hwndToInstance.find(hwnd)->second->notify();
                     }
-                    /* else it's a dim% value */
-                    else {
-                        float opacity = (float)value / 100;
-                        setMonitorOpacity(monitor, opacity);
-                    }
-
-                    hwndToInstance.find(hwnd)->second->notify();
                 }
+
 
                 if (instance->popupMenuChanged) {
                     instance->popupMenuChanged(false);
