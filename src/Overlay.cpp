@@ -63,8 +63,6 @@ Overlay::Overlay(HINSTANCE instance, Monitor monitor)
 , timerId(0) {
     registerClass(instance, &Overlay::windowProc);
 
-    this->bgBrush = CreateSolidBrush(getMonitorColor(monitor, RGB(0, 0, 0)));
-
     this->hwnd =
         CreateWindowEx(
             WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW,
@@ -81,6 +79,23 @@ Overlay::Overlay(HINSTANCE instance, Monitor monitor)
 
     SetWindowLong(this->hwnd, GWL_STYLE, 0); /* removes title, borders. */
 
+    this->update(monitor);
+}
+
+Overlay::~Overlay() {
+    this->killTimer();
+    DestroyWindow(this->hwnd);
+    hwndToOverlay.erase(hwndToOverlay.find(this->hwnd));
+    DeleteObject(this->bgBrush);
+}
+
+void Overlay::update(Monitor& monitor) {
+    if (this->bgBrush) {
+        DeleteObject(this->bgBrush);
+    }
+
+    this->bgBrush = CreateSolidBrush(getMonitorColor(monitor, RGB(0, 0, 0)));
+
     int x = monitor.info.rcMonitor.left;
     int y = monitor.info.rcMonitor.top;
     int width = monitor.info.rcMonitor.right - x;
@@ -93,14 +108,9 @@ Overlay::Overlay(HINSTANCE instance, Monitor monitor)
     SetLayeredWindowAttributes(this->hwnd, 0, opacity, LWA_ALPHA);
     SetWindowPos(this->hwnd, HWND_TOPMOST, x, y, width, height, SWP_FRAMECHANGED | SWP_SHOWWINDOW);
 
-    this->startTimer();
-}
+    UpdateWindow(this->hwnd);
 
-Overlay::~Overlay() {
-    this->killTimer();
-    DestroyWindow(this->hwnd);
-    hwndToOverlay.erase(hwndToOverlay.find(this->hwnd));
-    DeleteObject(this->bgBrush);
+    this->startTimer();
 }
 
 void Overlay::startTimer() {

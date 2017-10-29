@@ -47,8 +47,36 @@
 #pragma comment(linker,"/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 
 using OverlayPtr = std::shared_ptr<dimmer::Overlay>;
-static std::map<std::wstring, OverlayPtr> overlays;
+using Overlays = std::map<std::wstring, OverlayPtr>;
+static Overlays overlays;
 static std::vector<dimmer::Monitor> monitors;
+
+static void updateOverlays(HINSTANCE instance) {
+    monitors = dimmer::queryMonitors();
+
+    Overlays old;
+    std::swap(overlays, old);
+
+    if (dimmer::isDimmerEnabled()) {
+        for (auto monitor : monitors) {
+            if (dimmer::getMonitorOpacity(monitor) > 0.0f) {
+                auto id = monitor.getId();
+                auto it = old.find(monitor.getId());
+
+                OverlayPtr overlay;
+                if (it != old.end()) {
+                    overlay = it->second;
+                    overlay->update(monitor);
+                }
+                else {
+                    overlay = std::make_shared<dimmer::Overlay>(instance, monitor);
+                }
+
+                overlays[id] = overlay;
+            }
+        }
+    }
+}
 
 int CALLBACK wWinMain(HINSTANCE instance, HINSTANCE prev, LPWSTR args, int showType) {
     InitCommonControlsEx(nullptr);
@@ -56,18 +84,7 @@ int CALLBACK wWinMain(HINSTANCE instance, HINSTANCE prev, LPWSTR args, int showT
     dimmer::loadConfig();
 
     dimmer::TrayMenu trayMenu(instance, [instance]() {
-        monitors = dimmer::queryMonitors();
-        overlays.clear();
-
-        if (dimmer::isDimmerEnabled()) {
-            for (auto monitor : monitors) {
-                if (dimmer::getMonitorOpacity(monitor) > 0.0f) {
-                    auto overlay = std::make_shared<dimmer::Overlay>(instance, monitor);
-                    std::wstring name = monitor.info.szDevice;
-                    overlays[name] = overlay;
-                }
-            }
-        }
+        updateOverlays(instance);
     });
 
     trayMenu.setPopupMenuChangedCallback([](bool visible) {

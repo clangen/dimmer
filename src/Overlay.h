@@ -43,6 +43,7 @@ namespace dimmer {
             Overlay(HINSTANCE instance, Monitor monitor);
             ~Overlay();
 
+            void update(Monitor& monitor);
             void startTimer();
             void killTimer();
 
