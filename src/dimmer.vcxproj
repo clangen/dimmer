@@ -73,6 +73,9 @@
       <SubSystem>Windows</SubSystem>
       <AdditionalDependencies>Comctl32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
+    <PostBuildEvent>
+      <Command>if exist "z:\upx.exe" "z:\upx.exe" -9 "$(TargetPath)"</Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="Util.cpp" />

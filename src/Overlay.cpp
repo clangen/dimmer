@@ -47,6 +47,7 @@ constexpr wchar_t windowTitle[] = L"DimmerOverlayWindow";
 
 static ATOM overlayClass = 0;
 static std::map<HWND, Overlay*> hwndToOverlay;
+static WORD gammaRamp[3][256];
 
 static void registerClass(HINSTANCE instance, WNDPROC wndProc) {
     if (!overlayClass) {
@@ -114,11 +115,10 @@ static void colorTemperatureToRgb(int kelvin, float& red, float& green, float& b
 void Overlay::disableColorTemperature() {
     HDC dc = CreateDC(nullptr, monitor.info.szDevice, nullptr, nullptr);
     if (dc) {
-        static WORD ramp[3][256];
         for (int i = 0; i < 256; i++) {
-            ramp[0][i] = ramp[1][i] = ramp[2][i] = i * 256;
+            gammaRamp[0][i] = gammaRamp[1][i] = gammaRamp[2][i] = i * 256;
         }
-        SetDeviceGammaRamp(dc, ramp);
+        SetDeviceGammaRamp(dc, gammaRamp);
         DeleteDC(dc);
     }
 }
@@ -132,7 +132,6 @@ void Overlay::updateColorTemperature() {
     else {
         HDC dc = CreateDC(nullptr, monitor.info.szDevice, nullptr, nullptr);
         if (dc) {
-            static WORD ramp[3][256];
             float red = 1.0f;
             float green = 1.0f;
             float blue = 1.0f;
@@ -142,12 +141,12 @@ void Overlay::updateColorTemperature() {
 
             for (int i = 0; i < 256; i++) {
                 float brightness = i * (256.0f);
-                ramp[0][i] = (short)std::max(0.0f, std::min(65535.0f, brightness * red));
-                ramp[1][i] = (short)std::max(0.0f, std::min(65535.0f, brightness * green));
-                ramp[2][i] = (short)std::max(0.0f, std::min(65535.0f, brightness * blue));
+                gammaRamp[0][i] = (short)std::max(0.0f, std::min(65535.0f, brightness * red));
+                gammaRamp[1][i] = (short)std::max(0.0f, std::min(65535.0f, brightness * green));
+                gammaRamp[2][i] = (short)std::max(0.0f, std::min(65535.0f, brightness * blue));
             }
 
-            SetDeviceGammaRamp(dc, ramp);
+            SetDeviceGammaRamp(dc, gammaRamp);
 
             DeleteDC(dc);
         }
