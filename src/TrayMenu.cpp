@@ -263,48 +263,39 @@ LRESULT CALLBACK TrayMenu::windowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM
                 }
                 else if (id == MENU_ID_POLL) {
                     setPollingEnabled(!isPollingEnabled());
-                    hwndToInstance.find(hwnd)->second->notify();
                 }
                 else if (id == MENU_ID_ENABLED) {
                     setDimmerEnabled(!isDimmerEnabled());
-                    hwndToInstance.find(hwnd)->second->notify();
                 }
                 else {
                     auto index = (id / MENU_ID_MONITOR_BASE) - 1;
                     auto monitors = queryMonitors();
 
-                    if (monitors.size() <= (size_t)index) {
-                        return 1;
-                    }
+                    if (monitors.size() > (size_t)index) {
+                        auto monitor = monitors[index];
+                        auto value = id - (MENU_ID_MONITOR_BASE * (index + 1));
 
-                    auto monitor = monitors[index];
-                    auto value = id - (MENU_ID_MONITOR_BASE * (index + 1));
-
-                    if (value >= MENU_ID_DEFAULTK && value <= MENU_ID_6000K) {
-                        int temperature = -1;
-                        switch (value) {
-                            case MENU_ID_4500K: temperature = 4500; break;
-                            case MENU_ID_5000K: temperature = 5000; break;
-                            case MENU_ID_5500K: temperature = 5500; break;
-                            case MENU_ID_6000K: temperature = 6000; break;
+                        if (value >= MENU_ID_DEFAULTK && value <= MENU_ID_6000K) {
+                            int temperature = -1;
+                            switch (value) {
+                                case MENU_ID_4500K: temperature = 4500; break;
+                                case MENU_ID_5000K: temperature = 5000; break;
+                                case MENU_ID_5500K: temperature = 5500; break;
+                                case MENU_ID_6000K: temperature = 6000; break;
+                            }
+                            setMonitorTemperature(monitor, temperature);
                         }
-                        setMonitorTemperature(monitor, temperature);
-                        hwndToInstance.find(hwnd)->second->notify();
-                    }
-                    else if (id >= MENU_ID_MONITOR_BASE) {
-                        /* if above MENU_ID_MONITOR_USER it's not one of the % toggles */
-                        if (value >= MENU_ID_MONITOR_USER) {
-                            return 1;
+                        else if (id >= MENU_ID_MONITOR_BASE) {
+                            /* if above MENU_ID_MONITOR_USER it's not one of the % toggles */
+                            if (value < MENU_ID_MONITOR_USER) {
+                                float opacity = (float)value / 100;
+                                setMonitorOpacity(monitor, opacity);
+                            }
                         }
-                        /* else it's a dim% value */
-                        else {
-                            float opacity = (float)value / 100;
-                            setMonitorOpacity(monitor, opacity);
-                        }
-                        hwndToInstance.find(hwnd)->second->notify();
                     }
                 }
 
+                hwndToInstance.find(hwnd)->second->notify();
 
                 if (instance->popupMenuChanged) {
                     instance->popupMenuChanged(false);
