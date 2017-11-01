@@ -58,7 +58,7 @@ using namespace dimmer;
 #define MENU_ID_5500K (MENU_ID_MONITOR_USER + 4)
 #define MENU_ID_6000K (MENU_ID_MONITOR_USER + 5)
 
-constexpr wchar_t version[] = L"v0.2";
+constexpr wchar_t version[] = L"v0.3";
 constexpr wchar_t className[] = L"DimmerTrayMenuClass";
 constexpr wchar_t windowTitle[] = L"DimmerTrayMenuWindow";
 constexpr int offscreen = -32000;
@@ -98,8 +98,8 @@ static HMENU createMenu(HWND hwnd) {
             const int currentValue = j * 10;
 
             const std::wstring title = (j == 0)
-                ? L"disabled"
-                : std::to_wstring(currentValue) + L"%";
+                ? L"full brightness"
+                : std::to_wstring(100 - currentValue) + L"%";
 
             UINT flags = (currentValue == checkedValue) ? MF_CHECKED : 0;
             menuId = baseId + (j * 10);
