@@ -59,6 +59,10 @@ static void registerClass(HINSTANCE instance, WNDPROC wndProc) {
     }
 }
 
+static bool enabled(Monitor& monitor) {
+    return isDimmerEnabled() && isMonitorEnabled(monitor);
+}
+
 Overlay::Overlay(HINSTANCE instance, Monitor monitor)
 : instance(instance)
 , monitor(monitor)
@@ -126,7 +130,7 @@ void Overlay::disableColorTemperature() {
 void Overlay::updateColorTemperature() {
     int temperature = getMonitorTemperature(monitor);
 
-    if (!isDimmerEnabled() || temperature == -1) {
+    if (!enabled(monitor) || temperature == -1) {
         disableColorTemperature();
     }
     else {
@@ -163,7 +167,7 @@ void Overlay::disableBrigthnessOverlay() {
 }
 
 void Overlay::updateBrightnessOverlay() {
-    if (!isDimmerEnabled() || getMonitorOpacity(monitor) == 0.0f) {
+    if (!enabled(monitor) || getMonitorOpacity(monitor) == 0.0f) {
         disableBrigthnessOverlay();
     }
     else {

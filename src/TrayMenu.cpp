@@ -78,6 +78,12 @@ static UINT checked(int temp, int value) {
     return (temp == value) ? MF_CHECKED : MF_UNCHECKED;
 }
 
+static void refocus(HWND hwnd) {
+    BringWindowToTop(hwnd);
+    SetForegroundWindow(hwnd);
+    SetFocus(hwnd);
+}
+
 static HMENU createMenu(HWND hwnd) {
     if (menu) {
         DestroyMenu(menu);
@@ -156,7 +162,7 @@ static void registerClass(HINSTANCE instance, WNDPROC wndProc) {
 
 TrayMenu::TrayMenu(HINSTANCE instance, MonitorsChanged callback) {
     this->monitorsChanged = callback;
-    this->dialogVisible = false;
+    this->middleFlags = 0;
 
     registerClass(instance, &windowProc);
 
@@ -221,20 +227,54 @@ void TrayMenu::setPopupMenuChangedCallback(PopupMenuChanged callback) {
 
 LRESULT CALLBACK TrayMenu::windowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
+        case WM_KEYDOWN: {
+            auto instance = hwndToInstance.find(hwnd)->second;
+            if ((instance->middleFlags & MiddleDown) != 0) {
+                /* 1 through 9 */
+                if (wParam >= 0x31 && wParam <= 0x39) {
+                    size_t index = wParam - 0x31;
+                    auto monitors = queryMonitors();
+                    if (monitors.size() > index) {
+                        auto monitor = monitors[index];
+                        setMonitorEnabled(monitor, !isMonitorEnabled(monitor));
+                        instance->monitorsChanged();
+                        refocus(hwnd);
+                        instance->middleFlags |= MiddleProcessed;
+                    }
+                }
+                return 1;
+            }
+            break;
+        }
+
         case WM_TRAYICON: {
             auto instance = hwndToInstance.find(hwnd)->second;
-
-            if (instance->dialogVisible) {
-                return 1;
-            }
-
             auto type = LOWORD(lParam);
 
-            if (type == WM_MBUTTONUP) {
-                setDimmerEnabled(!isDimmerEnabled());
-                instance->notify();
+            if (type == WM_MBUTTONDOWN) {
+                if (instance->popupMenuChanged) {
+                    instance->popupMenuChanged(true);
+                }
+
+                instance->middleFlags |= MiddleDown;
+                refocus(hwnd);
                 return 1;
             }
+
+            if (type == WM_MBUTTONUP) {
+                if ((instance->middleFlags & MiddleProcessed) == 0) {
+                    setDimmerEnabled(!isDimmerEnabled());
+                    instance->notify();
+                }
+                else {
+                    if (instance->popupMenuChanged) {
+                        instance->popupMenuChanged(false);
+                    }
+                }
+                instance->middleFlags = 0;
+                return 1;
+            }
+
             if (type == WM_LBUTTONUP || type == WM_RBUTTONUP) {
                 if (instance->popupMenuChanged) {
                     instance->popupMenuChanged(true);
@@ -267,7 +307,7 @@ LRESULT CALLBACK TrayMenu::windowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM
                 else if (id == MENU_ID_ENABLED) {
                     setDimmerEnabled(!isDimmerEnabled());
                 }
-                else {
+                else if (id >= MENU_ID_MONITOR_BASE) {
                     auto index = (id / MENU_ID_MONITOR_BASE) - 1;
                     auto monitors = queryMonitors();
 

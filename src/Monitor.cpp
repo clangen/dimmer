@@ -43,8 +43,19 @@ using namespace nlohmann;
 constexpr float DEFAULT_OPACITY = 0.3f;
 constexpr int DEFAULT_TEMPERATURE = -1;
 
-static std::map<std::wstring, float> monitorToOpacity;
-static std::map<std::wstring, int> monitorToTemperature;
+struct MonitorOptions {
+    float opacity;
+    int temperature;
+    bool enabled;
+
+    MonitorOptions() {
+        this->opacity = DEFAULT_OPACITY;
+        this->temperature = DEFAULT_TEMPERATURE;
+        this->enabled = true;
+    }
+};
+
+static std::map<std::wstring, std::shared_ptr<MonitorOptions>> monitorOptions;
 static bool pollingEnabled = false;
 static bool globalEnabled = true;
 
@@ -57,6 +68,14 @@ static BOOL CALLBACK MonitorEnumProc(HMONITOR monitor, HDC hdc, LPRECT rect, LPA
     int index = (int) monitors->size();
     monitors->push_back(Monitor(monitor, index));
     return TRUE;
+}
+
+static MonitorOptions& options(Monitor& monitor) {
+    auto id = monitor.getId();
+    if (monitorOptions.find(id) == monitorOptions.end()) {
+        monitorOptions[id] = std::make_shared<MonitorOptions>();
+    }
+    return *monitorOptions[id];
 }
 
 namespace dimmer {
@@ -72,31 +91,21 @@ namespace dimmer {
         return result;
     }
 
-    float getMonitorOpacity(Monitor& monitor, float defaultOpacity) {
-        auto it = monitorToOpacity.find(monitor.getId());
-        if (it == monitorToOpacity.end()) {
-            setMonitorOpacity(monitor, defaultOpacity);
-            return defaultOpacity;
-        }
-        return it->second;
+    float getMonitorOpacity(Monitor& monitor) {
+        return options(monitor).opacity;
     }
 
     void setMonitorOpacity(Monitor& monitor, float opacity) {
-        monitorToOpacity[monitor.getId()] = opacity;
+        options(monitor).opacity = opacity;
         saveConfig();
     }
 
-    int getMonitorTemperature(Monitor& monitor, int defaultTemperature) {
-        auto it = monitorToTemperature.find(monitor.getId());
-        if (it == monitorToTemperature.end()) {
-            setMonitorTemperature(monitor, defaultTemperature);
-            return defaultTemperature;
-        }
-        return it->second;
+    int getMonitorTemperature(Monitor& monitor) {
+        return options(monitor).temperature;
     }
 
     void setMonitorTemperature(Monitor& monitor, int temperature) {
-        monitorToTemperature[monitor.getId()] = temperature;
+        options(monitor).temperature = temperature;
         saveConfig();
     }
 
@@ -120,6 +129,15 @@ namespace dimmer {
         }
     }
 
+    bool isMonitorEnabled(Monitor& monitor) {
+        return options(monitor).enabled;
+    }
+
+    void setMonitorEnabled(Monitor& monitor, bool enabled) {
+        options(monitor).enabled = enabled;
+        saveConfig();
+    }
+
     void loadConfig() {
         std::string config = fileToString(getConfigFilename());
         try {
@@ -127,9 +145,13 @@ namespace dimmer {
             auto m = j.find("monitors");
             if (m != j.end()) {
                 for (auto it = (*m).begin(); it != (*m).end(); ++it) {
-                    std::wstring key = u8to16(it.key());
-                    monitorToOpacity[key] = it.value().value<float>("opacity", DEFAULT_OPACITY);
-                    monitorToTemperature[key] = it.value().value<int>("temperature", DEFAULT_TEMPERATURE);
+                    auto key = u8to16(it.key());
+                    auto value = it.value();
+                    auto options = std::make_shared<MonitorOptions>();
+                    options->opacity = value.value<float>("opacity", DEFAULT_OPACITY);
+                    options->temperature = value.value<int>("temperature", DEFAULT_TEMPERATURE);
+                    options->enabled = value.value<bool>("enabled", true);
+                    monitorOptions[key] = options;
                 }
             }
 
@@ -152,7 +174,8 @@ namespace dimmer {
         for (auto monitor : monitors) {
             m[u16to8(monitor.getId())] = {
                 { "opacity", getMonitorOpacity(monitor) },
-                { "temperature", getMonitorTemperature(monitor) }
+                { "temperature", getMonitorTemperature(monitor) },
+                { "enabled", isMonitorEnabled(monitor) }
             };
         }
 

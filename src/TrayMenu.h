@@ -51,6 +51,11 @@ namespace dimmer {
             void setPopupMenuChangedCallback(PopupMenuChanged callback);
 
         private:
+            enum {
+                MiddleDown = 1,
+                MiddleProcessed = 2
+            };
+
             void initIcon();
 
             void notify() {
@@ -63,7 +68,7 @@ namespace dimmer {
                 HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
             HWND hwnd;
-            bool dialogVisible;
+            int middleFlags;
             NOTIFYICONDATA iconData;
             MonitorsChanged monitorsChanged;
             PopupMenuChanged popupMenuChanged;
