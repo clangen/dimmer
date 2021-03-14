@@ -58,6 +58,10 @@ namespace dimmer {
             if (pos == 0) {
                 name = name.substr(4);
             }
+            
+            // Include the monitor size in the name
+            name = name + L" " + std::to_wstring(this->info.rcMonitor.right - this->info.rcMonitor.left) + L"x" + std::to_wstring(this->info.rcMonitor.bottom - this->info.rcMonitor.top);
+
             return name;
         }
 
@@ -78,5 +82,6 @@ namespace dimmer {
     extern bool isDimmerEnabled();
     extern void setDimmerEnabled(bool enabled);
     extern void loadConfig();
+    extern void loadConfig(LPWSTR configName);
     extern void saveConfig();
 }
