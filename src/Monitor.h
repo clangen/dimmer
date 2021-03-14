@@ -58,6 +58,10 @@ namespace dimmer {
             if (pos == 0) {
                 name = name.substr(4);
             }
+            
+            // Include the monitor size in the name
+            name = name + L" " + std::to_wstring(this->info.rcMonitor.right - this->info.rcMonitor.left) + L"x" + std::to_wstring(this->info.rcMonitor.bottom - this->info.rcMonitor.top);
+
             return name;
         }
 
