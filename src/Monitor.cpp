@@ -63,6 +63,10 @@ static std::wstring getConfigFilename() {
     return getDataDirectory() + L"\\config.json";
 }
 
+static std::wstring getConfigFilename(std::wstring configName) {
+    return getDataDirectory() + L"\\" + configName + L".json";
+}
+
 static BOOL CALLBACK MonitorEnumProc(HMONITOR monitor, HDC hdc, LPRECT rect, LPARAM data) {
     auto monitors = reinterpret_cast<std::vector<Monitor>*>(data);
     int index = (int) monitors->size();
@@ -138,8 +142,7 @@ namespace dimmer {
         saveConfig();
     }
 
-    void loadConfig() {
-        std::string config = fileToString(getConfigFilename());
+    void parseConfig(std::string config) {
         try {
             json j = json::parse(config);
             auto m = j.find("monitors");
@@ -163,6 +166,22 @@ namespace dimmer {
         }
         catch (...) {
             /* move on... */
+        }
+    }
+
+    void loadConfig() {
+        std::string config = fileToString(getConfigFilename());
+        parseConfig(config);
+    }
+    
+    // Support loading a config from a file path
+    void loadConfig(LPWSTR configName) {
+        try {
+            std::string config = fileToString(getConfigFilename(configName));
+            parseConfig(config);
+        }
+        catch (...) {
+            // nothing
         }
     }
 

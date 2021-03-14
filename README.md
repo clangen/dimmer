@@ -14,6 +14,19 @@ it works like this:
 
 ![dimmer screenshot](https://raw.githubusercontent.com/clangen/clangen-projects-static/master/dimmer/screenshots/screenshot.png)
 
+# command line
+
+dimmer now supports reading the name of a config file from the command line.  The file must reside in 
+%APPDATA%\dimmer
+
+for example:
+
+```
+dimmer dark
+```
+
+will read the config file dark.json
+
 # installation
 
 download, unzip, and run! no installation or additional runtimes required.

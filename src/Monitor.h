@@ -78,5 +78,6 @@ namespace dimmer {
     extern bool isDimmerEnabled();
     extern void setDimmerEnabled(bool enabled);
     extern void loadConfig();
+    extern void loadConfig(LPWSTR configName);
     extern void saveConfig();
 }
